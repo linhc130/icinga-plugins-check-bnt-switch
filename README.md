@@ -1,5 +1,16 @@
 # icinga-plugins-check-bnt-switch
 
+This plugin checks BNT G8052 G8264 switches, including
+
+- CPU with warning and critical value
+- Fans (RPM)
+- Temperature
+- Power supply status
+- Global Health (G8264)
+- SNMP
+
+
+
 Worked with icinga 1.8.
 
 Should be work with icinga 1.x / nagios
