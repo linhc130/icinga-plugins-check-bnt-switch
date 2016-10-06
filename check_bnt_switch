@@ -1,0 +1,459 @@
+#!/usr/local/bin/python3.4
+# Copyright (c) 2015, 2016 IBM Corp.
+#
+# This module is free software; you can redistribute
+# it and/or modify it under the terms of GNU General Public
+# License (GPL) version 2.
+# Reference : https://exchange.nagios.org/directory/Plugins/Hardware/Network-Gear/Others/G8052-2FG8264-monitoring-plugin/details
+#
+# Fixed Bug 1 : CPU warning with int to str
+# Fixed Bug 2 : Modified fan_rpm to accept o RPM which indicates not install
+# Rewrite 1 : Temperature
+# Rewrite 2 : Fan
+# Remove 1 : G8052 Global_health due to inaccuracy of non-installed fans
+#
+# Modified by Stephen HC Lin
+
+import logging
+import argparse
+import subprocess
+import re
+
+CHECK_SNMP_CMD="/usr/local/icinga/libexec/check_snmp "
+# Orignal
+TEMPERATURE_OID1=".1.3.6.1.4.1.26543.100.100.14.11.0"
+TEMPERATURE_OID2=".1.3.6.1.4.1.26543.100.100.14.12.0"
+TEMPERATURE_OID3=".1.3.6.1.4.1.26543.100.100.14.13.0"
+TEMPERATURE_OID4=".1.3.6.1.4.1.26543.100.100.14.32.0"
+
+FAN_OID1=".1.3.6.1.4.1.26543.100.100.14.14.0"
+FAN_OID2=".1.3.6.1.4.1.26543.100.100.14.15.0"
+FAN_OID3=".1.3.6.1.4.1.26543.100.100.14.16.0"
+FAN_OID4=".1.3.6.1.4.1.26543.100.100.14.17.0"
+FAN_OID5=".1.3.6.1.4.1.26543.100.100.14.18.0"
+FAN_OID6=".1.3.6.1.4.1.26543.100.100.14.27.0"
+FAN_OID7=".1.3.6.1.4.1.26543.100.100.14.40.0"
+FAN_OID8=".1.3.6.1.4.1.26543.100.100.14.41.0"
+
+# Temperature OID
+# 8264 - 5 Sensors; Warning at 75 C and Recover at 90 C
+# 8052 - 11 Sensors
+#TEMPERATURE_OID=".1.3.6.1.4.1.26543.2.7.7.1.3.1.14.0"
+G8052_TEMPERATURE_OID=".1.3.6.1.4.1.26543.2.7.7.1.3.1.14.0"
+G8264_TEMPERATURE_OID=".1.3.6.1.4.1.26543.2.7.6.1.3.1.14.0"
+
+# FAN OID
+# 8264 - 8 Fans; But Fan 1 and 2 are 0 RPM due to non installed.
+# 8052 - 8 Fans
+#FAN_OID=".1.3.6.1.4.1.26543.2.7.7.1.3.1.13.0"
+G8052_FAN_OID=".1.3.6.1.4.1.26543.2.7.7.1.3.1.13.0"
+G8264_FAN_OID=".1.3.6.1.4.1.26543.2.7.6.1.3.1.13.0"
+
+POWER_OID1=".1.3.6.1.4.1.26543.100.100.14.20.0"
+POWER_OID2=".1.3.6.1.4.1.26543.100.100.14.21.0"
+SYS_OID=".1.3.6.1.2.1.1.3.0"
+G8264_CPU_64_SEC_OID=".1.3.6.1.4.1.26543.2.7.6.1.2.2.3.0"
+G8052_CPU_64_SEC_OID=".1.3.6.1.4.1.26543.2.7.7.1.2.2.3.0"
+G8264_GLOBAL_HEALTH_OID=".1.3.6.1.4.1.26543.2.7.6.1.3.1.15.0"
+G8052_GLOBAL_HEALTH_OID=".1.3.6.1.4.1.26543.2.7.7.1.3.1.15.0"
+
+G8052_MODEL="G8052"
+G8264_MODEL="G8264"
+
+def find_model_of_device(ip_address):
+    """
+      Find the Model of the IBM switch so that corresponding OIDs can be sent for query
+    """
+    _METHOD_ ="check_ibm_switch.find_model_of_device"
+
+    #Try to use snmpget to determine device
+    output = subprocess.check_output(["snmpget","-v2c","-c",community,address,"sysDescr.0"],stderr=subprocess.DEVNULL)
+    output = output.decode()
+    if G8052_MODEL in output:
+       return G8052_MODEL
+    elif G8264_MODEL in output:
+       return G8264_MODEL
+    else:
+       return "Unknown: Unsupported Model"
+
+def check_snmp_status():
+    """
+    Checking the snmp status of the switch
+    """
+    _METHOD_ ="check_ibm_switch.check_snmp_status"
+
+    cmd = CHECK_SNMP_CMD + "-H " + address + " -C " + community + " -o " + SYS_OID
+    output = subprocess.getoutput(cmd)
+
+    if ("SNMP OK" in output):
+       rc = 0
+       msg = "Normal: SNMP Status is OK"
+    else:
+       rc = 2
+       msg = "Warning: SNMP Status is down"
+
+    return (rc, msg)
+
+def check_cpu_status(warning, critical):
+    """
+    Checking the cpu status of the switch
+    """
+    _METHOD_ ="check_ibm_switch.check_cpu_status"
+
+    if (model == G8052_MODEL):
+        cpu_oid = G8052_CPU_64_SEC_OID
+    elif (model == G8264_MODEL):
+        cpu_oid = G8264_CPU_64_SEC_OID
+    else:
+        msg = "Unknown: CPU Utilization is unknown - Unsupported Model"
+        rc = 3
+        return (rc, msg)
+
+    cmd = CHECK_SNMP_CMD + "-H " + address + " -C " + community + " -o " + cpu_oid
+    output = subprocess.getoutput(cmd)
+    value = output.split()[3].strip('"')
+
+    cpu_util=float(value)
+
+    # OK:
+    # -All Power modules are on
+    # Critical:
+    # -One or more Power modules are off or absent
+
+    if (cpu_util > critical) :
+       msg = "Critical: High CPU utilization over " + str(critical) +"%"
+       rc = 2
+    elif (cpu_util > warning):
+      msg = "Warning: CPU utiliziation over " + str(warning) + "%"
+      rc = 1
+    elif (cpu_util <= warning):
+      msg = "Normal: CPU utilization is normal"
+      rc = 0
+    else:
+      msg = "Unknown: CPU utilization unknown"
+      rc = 3
+
+    return (rc, msg)
+
+def check_fan_status():
+    """
+    Checking the fan status of the switch
+    """
+    _METHOD_ ="check_ibm_switch.check_fan_status"
+    if (model == G8052_MODEL):
+        FAN_OID = G8052_FAN_OID
+    elif (model == G8264_MODEL):
+        FAN_OID = G8264_FAN_OID
+    else:
+        msg = "Unknown: Fan status is unknown - Unsupported Model"
+        rc = 3
+        return (rc, msg)
+
+    try :
+        cmd = CHECK_SNMP_CMD + "-H " + address + " -C " + community + " -o " + FAN_OID
+        output = subprocess.getoutput(cmd)
+        #  Sample output = SNMP OK - "Fan 1: 0 RPM (25 PWM); Fan 2: 0 RPM (25 PWM); Fan 3: 8372 RPM (25 PWM); Fan 4: 3898 RPM (25 PWM); Fan 5: 7792 RPM (25 PWM); Fan 6: 3341 RPM (25 PWM); Fan 7: 8626 RPM (25 PWM); Fan 8: 3840 RPM (25 PWM); " |
+
+        value = output.split('"')[1].strip()
+        allFans = re.findall(r'\d+ RPM',value)
+
+        fans = []
+        for i in range(8):
+            fans.append(int(re.sub(r' RPM','',allFans[i])))
+
+        # OK:
+        # -All Fans are OK
+        # Critical:
+        # -One or more Fans re running less than 100 RPM
+
+        for fan_rpm in fans:
+            if fan_rpm > 0 and fan_rpm < 100:
+                msg = "Critical: Fans status is critical \n  -One or more fans are running < 100 RPM"+";"+value
+                rc = 2
+                return (rc, msg)
+
+        msg = "Normal: Fan Status is normal"+";"+value
+        rc = 0
+
+    except Exception as e:
+        rc = 3
+        msg = "Unknown: Fan status is unknown"
+
+    return (rc, msg)
+
+def check_power_status():
+    """
+    Checking the power status of the switch
+    """
+    _METHOD_ ="check_ibm_switch.check_power_status"
+
+    cmd = CHECK_SNMP_CMD + "-H " + address + " -C " + community + " -o " + POWER_OID1 + " -o " + POWER_OID2
+    output = subprocess.getoutput(cmd)
+    value = output.split('-')[1].strip()
+    allPowers = value.split()
+    power1= int(allPowers[0].strip('"'))
+    power2= int(allPowers[1].strip('"'))
+
+    # OK:
+    # -All Power modules are on
+    # Critical:
+    # -One or more Power modules are off or absent
+
+    if (power1 == 1 and power2 == 1) :
+       msg = "Normal: All Power modules are On"
+       rc = 0
+    elif (power1 == 0 or power1 == 2 or power2 == 0 or power2 == 2):
+      msg = "Critical: One or more Power modules are off or absent"
+      rc = 2
+    else:
+      msg = "Unknown: Power status unknown"
+      rc = 3
+
+    return (rc, msg)
+
+def check_g8052_temperature_status():
+    # Rewrote by Stephen with an OID which contains all temperatures
+
+    # Define Warning and Critical value by reference system output
+    # Reference : SNMPv2-SMI::enterprises.26543.2.7.7.1.3.1.12.0 = STRING: "Fans are in Back-To-Front AirFlow, Warning at 55 C and Recover at 80 C for sensor 1,2; Warning at 95 C and Recover at 120 C for sensor 6-11
+    # Critical:
+    #  -Any of temperature sensor 1,2 is in the failure range (eg. > 80 C);
+    #  -Any of temperature sensors 6-11 is in the failure range (eg. > 120 C);
+    # Warning:
+    #  -Any of temperature sensor 1,2 is in the warning threshold (eg. > 55 C);
+    #  -Any of temperature sensors 6-11 is in the warning threshold (eg. > 95 C);
+    # OK:
+    #  -temperature sensor 1,2 are below the warning threshold (eg. < 55 C);
+    #  -temperature sensor 6-11 are below the warning threshold (eg. < 95 C);
+    sysCritical=80.0
+    phyCritical=120.0
+    sysWarning=55.0
+    phyWarning=95.0
+    
+    try :
+        cmd = CHECK_SNMP_CMD + "-H " + address + " -C " + community + " -o " + G8052_TEMPERATURE_OID
+        output = subprocess.getoutput(cmd)
+        # Sample output = 'SNMP OK - "Sensor 1: 28.0; Sensor 2: 31.5; Sensor 3: 30.50; Sensor 4: 48.00; Sensor 5: 47.25; Sensor 6: 56.0; Sensor 7: 52.0; Sensor 8: 63.0; Sensor 9: 49.0; Sensor 10: 49.0; Sensor 11: 56.0; " |'
+
+        value = output.split('"')[1].strip()
+        allTemps = re.findall(r'\d+.\d+',value)
+        #allTemps = re.findall(r'[-+]?\d*\.\d+|\d+',value)
+
+        temps = []
+        for i in range(11):
+            temps.append(float(allTemps[i]))
+            #temps.append(float(re.sub(r';','',temp)))
+
+        # Critical:
+        #  -Any of temperature sensor 1,2 is in the failure range (eg. > 80 C);
+        #  -Any of temperature sensors 6-11 is in the failure range (eg. > 120 C);
+        # Warning:
+        #  -Any of temperature sensor 1,2 is in the warning threshold (eg. > 55 C);
+        #  -Any of temperature sensors 6-11 is in the warning threshold (eg. > 95 C);
+        # OK:
+        #  -temperature sensor 1,2 are below the warning threshold (eg. < 55 C);
+        #  -temperature sensor 6-11 are below the warning threshold (eg. < 95 C);
+        
+        rc = 0
+        msg = "Normal: Temperature status is normal;"+value
+        
+        # Check Critical 
+        for i in range(0, 2):
+            if temps[i] >= sysCritical:
+                msg = "Critical: Temparature is critical;"+str(temps[i])+";"+value
+                rc = 2
+                return (rc, msg)
+        
+        for i in range(5, 11):
+            if temps[i] >= phyCritical:
+                msg = "Critical: Temparature is critical;"+str(temps[i])+";"+value
+                rc = 2
+                return (rc, msg)
+        
+        # Check Warning 
+        for i in range(0, 2):
+            if temps[i] >= sysWarning:
+                msg = "Warning: Temparature status is warning;"+str(temps[i])+";"+value
+                rc = 1
+                return (rc, msg)
+        
+        for i in range(5, 11):
+            if temps[i] >= phyWarning:
+                msg = "Warning: Temparature status is warning;"+str(temps[i])+";"+value
+                rc = 1
+                return (rc, msg)
+
+    except Exception as e:
+        rc = 3
+        msg = "Unknown: Temperature status is unknown"
+
+    return (rc, msg)
+
+def check_g8264_temperature_status():
+    # Rewrote by Stephen with an OID which contains all temperatures
+
+    # Define Warning and Critical value by reference system output
+    # Reference : ./check_snmp -H 172.16.164.230 -C cdltpitteam2hs4rre -o".1.3.6.1.4.1.26543.2.7.6.1.3.1.12.0" | P OK - Fans are in Back-To-Front AirFlow, Warning at 75 C and Recover at 90 C.1.3.6.1.4.1.26543.2.7.6.1.3.1.12.0:"Fans are in Back-To-Front AirFlow, Warning at 75 C and Recover at 90 C"
+    # Critical:
+    #  -Any of temperature sensors is in the failure range (eg. > 90 C);
+    # Warning:
+    #  -Any of temperature sensors is in the warning threshold (eg. > 75 C);
+    # OK:
+    #  -all temperature sensors are below the warning threshold (eg. < 75 C);
+
+    sysCritical=90.0
+    sysWarning=75.0
+    
+    try :
+        cmd = CHECK_SNMP_CMD + "-H " + address + " -C " + community + " -o " + G8264_TEMPERATURE_OID
+        output = subprocess.getoutput(cmd)
+        # Sample output = 'SNMP OK - "Sensor 1: 38.0; Sensor 2: 24.0; Sensor 3: 34.5; Sensor 4: 20.5; Sensor 5: 43; " |'
+
+        value = output.split('"')[1].strip()
+        allTemps = re.findall(r'[-+]?\d*\.\d+|\d+',value)
+
+        temps = []
+        for temp in allTemps:
+            temps.append(float(re.sub(r';','',temp)))
+
+        # Critical:
+        #  -Any of temperature sensors is in the failure range (eg. > 90 C);
+        # Warning:
+        #  -Any of temperature sensors is in the warning threshold (eg. > 75 C);
+        # OK:
+        #  -all temperature sensors are below the warning threshold (eg. < 75 C);
+
+        rc = 0
+        msg = "Normal: Temperature status is normal;"+value
+
+        # Check Temperature Critical threshold
+        for temp in temps:
+            if temp >= sysCritical:
+                msg = "Critical: Temparature is critical;"+str(temp)+";"+value
+                rc = 2
+                return (rc, msg)
+
+        # Check Temperature Warning threshold
+        for temp in temps:
+            if temp >= sysWarning:
+                msg = "Warning: Temparature status is warning;"+str(temp)+";"+value
+                rc = 1
+                return (rc, msg)
+
+    except Exception as e:
+        rc = 3
+        msg = "Unknown: Temperature status is unknown"
+
+    return (rc, msg)
+
+def check_temperature_status():
+    """
+    Checking the temperature status of the switch - Rewrote by Stephen separate check funtions of G8052 and G8264
+    """
+    _METHOD_ ="check_ibm_switch.check_temperature_status"
+    if (model == G8052_MODEL):
+        (rc,msg) = check_g8052_temperature_status()
+        return (rc, msg)
+    elif (model == G8264_MODEL):
+        (rc,msg) = check_g8264_temperature_status()
+        return (rc, msg)
+    else:
+        msg = "Unknown: Temperature Utilization is unknown - Unsupported Model"
+        rc = 3
+        return (rc, msg)
+
+def check_global_health():
+    """
+    Checking the global status of the switch. This method uses OID - modified by Stephen
+    """
+    _METHOD_ ="check_ibm_switch.check_global_health"
+
+    if (model == G8052_MODEL):
+        #global_health_oid = G8052_GLOBAL_HEALTH_OID
+        # Through field tests, G8052 may report critical caused by first 2 Fans are not installed.
+        msg = "Unknown: Global Health Status is not accurate at G8052"
+        rc = 3
+        return (rc, msg)
+    elif (model == G8264_MODEL):
+        global_health_oid = G8264_GLOBAL_HEALTH_OID
+    else:
+        msg = "Unknown: Global Health Status is unknown"
+        rc = 3
+        return (rc, msg)
+
+    cmd = CHECK_SNMP_CMD + "-H " + address + " -C " + community + " -o " + global_health_oid
+    output = subprocess.getoutput(cmd)
+    value = output.split('=')[1].strip()
+
+    # OK:
+    # -All temperature sensors are below the warning threshold (eg. < 85 C);
+    # -All fans are running at >=100 RPMs;
+    # -Both power supplies are on;
+    # -No panic dump exists in flash.
+    # Warning:
+    # -One or more temperature sensors is in the warning range (eg. >=85 and < 100 C);
+    # -A panic dump exists in flash.
+    # Critical:
+    # -One or more temperature sensors is in the failure range (eg. >=100 C);
+    # -One or more fans are running < 100 RPM;
+    # -One power supply is off.
+
+    if (value == '1'):
+        msg = "Normal: Global Health Status is OK \n  -All temperature sensors are below the warning threshold \n  -All fans are running at >=100 RPMs \n  -Both power supplies are on \n  -No panic dump exists in flash"
+        rc = 0
+    elif (value == '2'):
+        msg = "Warning: Global Health Status is non-critical \nwhich means one of the following:\n  -One or more temperature sensors is in the warning range \n  -A panic dump exists in flash"
+        rc = 1
+    elif (value == '3'):
+        msg = "Critical: Global Health Status is critical \nwhich means one of the following:\n  -One or more temperature sensors is in the failure range \n  -One or more fans are running < 100 RPM \n  -One power supply is off"
+        rc = 2
+    else:
+        msg = "Unknown: Global Health Status is unknown"
+        rc = 3
+
+    return (rc, msg)
+
+if __name__ == '__main__':
+
+    CMD = "check_ibm_switch"
+    parser = argparse.ArgumentParser()
+    parser.add_argument("operation")
+    parser.add_argument('-H', '--Host', required=True)
+    parser.add_argument('-C', '--Community', required=True)
+    parser.add_argument('-c', '--critical', required=False, type=int)
+    parser.add_argument('-w', '--warning', required=False, type=int)
+    args = parser.parse_args()
+    operation = args.operation
+    address = args.Host
+    warning = args.warning
+    critical = args.critical
+    community = args.Community
+
+    model = find_model_of_device(address)
+
+    if (operation == "CPU"):
+        if (warning == None or critical == None):
+            rc = 3
+            msg = "Warning or Critical levels missing"
+            print (msg)
+            exit(rc)
+
+    if operation == "GLOBAL_HEALTH":
+        (rc,msg) = check_global_health()
+    elif operation == "TEMPERATURE":
+        # Remove threshold setting - 8052 has 2 thresholds on sensors
+        (rc,msg) = check_temperature_status()
+    elif operation == "FAN":
+        (rc,msg) = check_fan_status()
+    elif operation == "POWER":
+        (rc,msg) = check_power_status()
+    elif operation == "SNMP":
+        (rc,msg) = check_snmp_status()
+    elif operation == "CPU":
+        (rc,msg) = check_cpu_status(warning, critical)
+    else:
+        msg = "Unknown operation: " + operation
+        rc = 3
+
+    print(msg)
+    exit(rc)
