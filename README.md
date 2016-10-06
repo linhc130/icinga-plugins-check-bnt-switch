@@ -1,6 +1,6 @@
 # icinga-plugins-check-bnt-switch
 
-This plugin checks BNT G8052 G8264 switches, including
+This plugin checks (IBM, Lenovo) BNT G8052 G8264 switches, including
 
 - CPU with warning and critical value
 - Fans (RPM)
