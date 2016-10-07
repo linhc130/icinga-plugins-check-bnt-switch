@@ -64,7 +64,7 @@ def find_model_of_device(ip_address):
     """
       Find the Model of the IBM switch so that corresponding OIDs can be sent for query
     """
-    _METHOD_ ="check_ibm_switch.find_model_of_device"
+    _METHOD_ ="check_bnt_switch.find_model_of_device"
 
     #Try to use snmpget to determine device
     output = subprocess.check_output(["snmpget","-v2c","-c",community,address,"sysDescr.0"],stderr=subprocess.DEVNULL)
@@ -80,7 +80,7 @@ def check_snmp_status():
     """
     Checking the snmp status of the switch
     """
-    _METHOD_ ="check_ibm_switch.check_snmp_status"
+    _METHOD_ ="check_bnt_switch.check_snmp_status"
 
     cmd = CHECK_SNMP_CMD + "-H " + address + " -C " + community + " -o " + SYS_OID
     output = subprocess.getoutput(cmd)
@@ -98,7 +98,7 @@ def check_cpu_status(warning, critical):
     """
     Checking the cpu status of the switch
     """
-    _METHOD_ ="check_ibm_switch.check_cpu_status"
+    _METHOD_ ="check_bnt_switch.check_cpu_status"
 
     if (model == G8052_MODEL):
         cpu_oid = G8052_CPU_64_SEC_OID
@@ -139,7 +139,7 @@ def check_fan_status():
     """
     Checking the fan status of the switch
     """
-    _METHOD_ ="check_ibm_switch.check_fan_status"
+    _METHOD_ ="check_bnt_switch.check_fan_status"
     if (model == G8052_MODEL):
         FAN_OID = G8052_FAN_OID
     elif (model == G8264_MODEL):
@@ -185,7 +185,7 @@ def check_power_status():
     """
     Checking the power status of the switch
     """
-    _METHOD_ ="check_ibm_switch.check_power_status"
+    _METHOD_ ="check_bnt_switch.check_power_status"
 
     cmd = CHECK_SNMP_CMD + "-H " + address + " -C " + community + " -o " + POWER_OID1 + " -o " + POWER_OID2
     output = subprocess.getoutput(cmd)
@@ -350,7 +350,7 @@ def check_temperature_status():
     """
     Checking the temperature status of the switch - Rewrote by Stephen separate check funtions of G8052 and G8264
     """
-    _METHOD_ ="check_ibm_switch.check_temperature_status"
+    _METHOD_ ="check_bnt_switch.check_temperature_status"
     if (model == G8052_MODEL):
         (rc,msg) = check_g8052_temperature_status()
         return (rc, msg)
@@ -366,7 +366,7 @@ def check_global_health():
     """
     Checking the global status of the switch. This method uses OID - modified by Stephen
     """
-    _METHOD_ ="check_ibm_switch.check_global_health"
+    _METHOD_ ="check_bnt_switch.check_global_health"
 
     if (model == G8052_MODEL):
         #global_health_oid = G8052_GLOBAL_HEALTH_OID
@@ -415,7 +415,7 @@ def check_global_health():
 
 if __name__ == '__main__':
 
-    CMD = "check_ibm_switch"
+    CMD = "check_bnt_switch"
     parser = argparse.ArgumentParser()
     parser.add_argument("operation")
     parser.add_argument('-H', '--Host', required=True)
