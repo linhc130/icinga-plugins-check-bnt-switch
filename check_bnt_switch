@@ -87,7 +87,7 @@ def check_snmp_status():
 
     if ("SNMP OK" in output):
        rc = 0
-       msg = "Normal: SNMP Status is OK"
+       msg = "OK: SNMP Status is OK"
     else:
        rc = 2
        msg = "Warning: SNMP Status is down"
@@ -127,7 +127,7 @@ def check_cpu_status(warning, critical):
       msg = "Warning: CPU utiliziation over " + str(warning) + "%"
       rc = 1
     elif (cpu_util <= warning):
-      msg = "Normal: CPU utilization is normal"
+      msg = "OK: CPU utilization is ok"
       rc = 0
     else:
       msg = "Unknown: CPU utilization unknown"
@@ -172,7 +172,7 @@ def check_fan_status():
                 rc = 2
                 return (rc, msg)
 
-        msg = "Normal: Fan Status is normal"+";"+value
+        msg = "OK: Fan Status is ok"+";"+value
         rc = 0
 
     except Exception as e:
@@ -200,7 +200,7 @@ def check_power_status():
     # -One or more Power modules are off or absent
 
     if (power1 == 1 and power2 == 1) :
-       msg = "Normal: All Power modules are On"
+       msg = "OK: All Power modules are On"
        rc = 0
     elif (power1 == 0 or power1 == 2 or power2 == 0 or power2 == 2):
       msg = "Critical: One or more Power modules are off or absent"
@@ -255,7 +255,7 @@ def check_g8052_temperature_status():
         #  -temperature sensor 6-11 are below the warning threshold (eg. < 95 C);
         
         rc = 0
-        msg = "Normal: Temperature status is normal;"+value
+        msg = "OK: Temperature status is ok;"+value
         
         # Check Critical 
         for i in range(0, 2):
@@ -324,7 +324,7 @@ def check_g8264_temperature_status():
         #  -all temperature sensors are below the warning threshold (eg. < 75 C);
 
         rc = 0
-        msg = "Normal: Temperature status is normal;"+value
+        msg = "OK: Temperature status is ok;"+value
 
         # Check Temperature Critical threshold
         for temp in temps:
@@ -399,7 +399,7 @@ def check_global_health():
     # -One power supply is off.
 
     if (value == '1'):
-        msg = "Normal: Global Health Status is OK \n  -All temperature sensors are below the warning threshold \n  -All fans are running at >=100 RPMs \n  -Both power supplies are on \n  -No panic dump exists in flash"
+        msg = "OK: Global Health Status is OK \n  -All temperature sensors are below the warning threshold \n  -All fans are running at >=100 RPMs \n  -Both power supplies are on \n  -No panic dump exists in flash"
         rc = 0
     elif (value == '2'):
         msg = "Warning: Global Health Status is non-critical \nwhich means one of the following:\n  -One or more temperature sensors is in the warning range \n  -A panic dump exists in flash"
